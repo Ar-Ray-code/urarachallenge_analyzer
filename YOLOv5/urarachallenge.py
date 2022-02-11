@@ -64,10 +64,10 @@ class urarachallenge_main(Node):
         # script dir
         script_dir = os.path.dirname(os.path.abspath(__file__))
         # get path using select-folder-file-dialog.py
-        self.csv_file_path = Popen(["python3", script_dir + "/../../select-folder-file-dialog/select-folder-file-dialog.py", "-f", "-t", "Open CSV", '-e', home], stdout=PIPE).communicate()[0].decode('utf-8').rstrip()
+        self.csv_file_path = Popen(["python3", script_dir + "/../select-folder-file-dialog/select-folder-file-dialog.py", "-f", "-t", "Open CSV", '-e', home], stdout=PIPE).communicate()[0].decode('utf-8').rstrip()
         print(self.csv_file_path)
         # select target video file path
-        self.video_file_path = Popen(["python3", script_dir + "/../../select-folder-file-dialog/select-folder-file-dialog.py", "-f", "-t", "Open Video", '-e', home], stdout=PIPE).communicate()[0].decode('utf-8').rstrip()
+        self.video_file_path = Popen(["python3", script_dir + "/../select-folder-file-dialog/select-folder-file-dialog.py", "-f", "-t", "Open Video", '-e', home], stdout=PIPE).communicate()[0].decode('utf-8').rstrip()
         print(self.video_file_path)
 
         self.test_data_class.read_csv_point_xy(self.csv_file_path)
