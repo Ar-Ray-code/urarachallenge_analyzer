@@ -1,10 +1,10 @@
+from socket import timeout
 import PyQt5
 import sys
 import os
 import cv2
 import numpy as np
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QFileDialog
+import matplotlib.pyplot as plt
 
 import rclpy
 from rclpy.node import Node
@@ -14,48 +14,13 @@ from sensor_msgs.msg import Image
 from bboxes_ex_msgs.msg import BoundingBoxes, BoundingBox
 
 from subprocess import Popen, PIPE
-import signal
-
-class ExecuteROS2RUN():
-    def __init__(self, node_name:str, pkg_name:str, custom_node_name:str=None, args:list=None):
-        # self.node_str = ["ros2", "run", pkg_name, custom_node_name]
-        self.node_str = ["ros2", "run", pkg_name, node_name]
-        self.node_str.extend(args)
-
-    def __del__(self):
-        self.close_node()
-
-    def open_node(self):
-        self.p = Popen(self.node_str, stdout=PIPE, stderr=PIPE)
-        self.p.wait()
-    
-    def close_node(self):
-        self.p.kill()
-
-class ExecuteROS2Launch():
-    def __init__(self, launch_file_path:str, args:list=None):
-        self.launch_file_path = launch_file_path
-        self.launch_str = ["ros2", "launch", self.launch_file_path]
-        self.launch_str.extend(args)
-
-    def __del__(self):
-        self.delete()
-
-    def start(self):
-        self.p = Popen(self.launch_str, stdout=PIPE, stderr=PIPE)
-        # self.p.wait()
-        # detach process
-        self.p.detach()
-    
-    def delete(self):
-        # self.p.kill()
-        # Ctrl + C
-        os.kill(self.p.pid, signal.SIGINT)
 
 class test_data():
     def __init__(self) -> None:
         self.csv_points_xy = []
         self.target_points_xy = []
+        self.detection_result = []
+        self.raw_bbox_ex_msg = []
     
     def read_csv_point_xy(self, csv_path:str) -> None:
         with open(csv_path, 'r') as f:
@@ -64,135 +29,157 @@ class test_data():
             lines = [line.strip().split(',') for line in lines]
             lines = [[float(x) for x in line] for line in lines]
         self.csv_points_xy = lines
-        print(self.csv_points_xy)
+        # print(self.csv_points_xy)
         return None
     
     def define_target_points_length(self, length:int) -> None:
         # fill -1
         for i in range(length):
             self.target_points_xy.append([-1, -1])
+            self.detection_result.append("None")
+        
+        # length
+        print("target_points_xy:", len(self.target_points_xy))
         return None
     
 
 # ========================================================
-class MainWindow(QMainWindow):
+class urarachallenge_main(Node):
     def __init__(self):
-        super().__init__()
+        super().__init__('urarachallenge')
 
         self.test_data_class = test_data()
 
-        # ROS2 init ============================================================
-        rclpy.init(args=None)
-        self.node = Node('button_sub')
+        # ROS2 init =============================================
         self.cv_bridge = CvBridge()
 
-        self.image_pub = self.node.create_publisher(Image, 'image', 10)
-        self.sub = self.node.create_subscription(BoundingBoxes, 'bboxes', self.sub_bboxes, 10)
+        self.image_pub = self.create_publisher(Image, 'image_raw', 10)
+        self.sub = self.create_subscription(BoundingBoxes, '/yolov5/bounding_boxes', self.sub_bboxes, 10)
 
         # Qt init ============================================================
-
         self.frame_number = 1 # publish image frame number
-        
-        self.subscribe_ros2_flag = False
-
-        self.number = 0
-
-        self.title = 'PyQt test(Subscriber)'
-        self.width = 400
-        self.height = 200
-        self.setWindowTitle(self.title)
-        self.setGeometry(0, 0, self.width, self.height)
-        
-        self.create_widgets()
 
         # select csv file path
         home = os.path.expanduser('~')
-        self.csv_file_path = QFileDialog.getOpenFileName(self, 'Open CSV file', home)[0]
+        # script dir
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # get path using select-folder-file-dialog.py
+        self.csv_file_path = Popen(["python3", script_dir + "/../../select-folder-file-dialog/select-folder-file-dialog.py", "-f", "-t", "Open CSV", '-e', home], stdout=PIPE).communicate()[0].decode('utf-8').rstrip()
         print(self.csv_file_path)
         # select target video file path
-        self.video_file_path = QFileDialog.getOpenFileName(self, 'Open Targegt Video file', home)[0]
+        self.video_file_path = Popen(["python3", script_dir + "/../../select-folder-file-dialog/select-folder-file-dialog.py", "-f", "-t", "Open Video", '-e', home], stdout=PIPE).communicate()[0].decode('utf-8').rstrip()
         print(self.video_file_path)
 
         self.test_data_class.read_csv_point_xy(self.csv_file_path)
 
         # create cache
+        self.test_data_class.define_target_points_length(len(self.test_data_class.csv_points_xy))
         self.create_target_images()
 
-        # start YOLOv5-ROS
-        # get this script path
-        self.script_path = os.path.dirname(os.path.abspath(__file__))
-        self.target_detection = ExecuteROS2Launch(self.script_path + "/yolov5s.launch.py")
-        self.target_detection.start()
-
-        self.subscribe_ros2_flag = True
-
-
-        # spin once
-        rclpy.spin_once(self.node)
+        self.publish_image()
 
     def __del__(self):
-        self.target_detection.delete()
-        self.node.destroy_node()
-
-    # Qt ============================================================
-    def create_widgets(self):
-        # create label
-        self.label = QLabel(self)
-        self.label.setText(str(self.number))
-        self.label.move(100, 100)
-        self.show()
-
-        # create timer
-        self.timer = QtCore.QTimer(self)
-        self.timer.timeout.connect(self.timer_update)
-        self.timer.start(10)
+        pass
     
-    # Qt timer update (subscribe)
-    def timer_update(self):
-        if self.subscribe_ros2_flag:
-            rclpy.spin_once(self.node)
-        
-        # show
-        self.update_label()
-        self.show()
-        # update after 1 second
-        self.timer.start(10)
-
-    def update_label(self):
-        self.label.setText(str(self.number))
-        # show
-        self.show()
     
     # ROS2 ============================================================
     def publish_image(self):
-        image = cv2.imread(self.video_file_path + "/frame%d.jpg" % self.frame_number)
+        frame_name = str(self.frame_number).zfill(3)
+        print_data = self.cache_dir + "/image_" + frame_name + ".png"
+        print(print_data)
+
+        image = cv2.imread(self.cache_dir + "/image_" + frame_name + ".png")
         # get image
         self.image_pub.publish(self.cv_bridge.cv2_to_imgmsg(image, encoding="bgr8"))
-        # spin once
-        rclpy.spin_once(self.node)
 
     def sub_bboxes(self, msg:BoundingBoxes):
-        # self.number = msg.data
-        # rclpy.spin_once(self.node)
-        # print(self.number)
-        print(msg.xmin)
-        self.update_label()
-    
 
+        self.raw_bbox_ex_msg = msg
+
+        csv_x = self.test_data_class.csv_points_xy[self.frame_number - 1][0]
+        csv_y = self.test_data_class.csv_points_xy[self.frame_number - 1][1]
+
+        # search bbox label in csv file
+        for box in msg.bounding_boxes:
+            if box.xmin < csv_x and box.xmax > csv_x and box.ymin < csv_y and box.ymax > csv_y:
+                print(str(csv_x), "," , str(csv_y) , ":", box.class_id)
+                self.test_data_class.target_points_xy[self.frame_number - 1][0] = csv_x
+                self.test_data_class.target_points_xy[self.frame_number - 1][1] = csv_y
+                self.test_data_class.detection_result[self.frame_number - 1] = box.class_id
+                print(box.class_id)
+                break
+
+        self.frame_number += 1
+
+        if self.frame_number > len(self.test_data_class.csv_points_xy):
+            self.write_report_csv()
+
+            # self.target_detection.delete()
+            self.destroy_node()
+            sys.exit()
+        
+        self.publish_image()
+
+    def write_report_csv(self):
+        write_csv_path = self.cache_dir + "/../report.csv"
+        with open(write_csv_path, 'w') as f:
+            f.write("frame,x,y\n")
+            for i in range(len(self.test_data_class.target_points_xy)-1):
+                print(i, self.test_data_class.target_points_xy[i][0], self.test_data_class.target_points_xy[i][1], self.test_data_class.detection_result[i])
+                f.write("%d,%f,%f,%s\n" % (i , self.test_data_class.target_points_xy[i][0], self.test_data_class.target_points_xy[i][1], self.test_data_class.detection_result[i]))
+        self.pychart_plot()
+        return None
+
+    def pychart_plot(self):
+        person_count = 0
+        horse_count = 0
+        teddy_count = 0
+        kite_count = 0
+
+        # delete list (-1)
+        detection_data = []
+        for i in range(len(self.test_data_class.detection_result)):
+            if self.test_data_class.csv_points_xy[i][0] == -1:
+                continue
+            else:
+                detection_data.append(self.test_data_class.detection_result[i])
+
+        person_count = detection_data.count("person")
+        horse_count = detection_data.count("horse")
+        teddy_count = detection_data.count("teddy bear")
+        kite_count = detection_data.count("kite")
+        other = len(detection_data) - person_count - horse_count - teddy_count - kite_count
+
+        print("total:", len(detection_data))
+        print("person:", person_count)
+        print("horse:", horse_count)
+        print("teddy:", teddy_count)
+        print("kite:", kite_count)
+        print("other:", other)
+
+        # pie chart
+        labels = 'person', 'horse', 'teddy bear', 'kite', 'other'
+        sizes = [person_count, horse_count, teddy_count, kite_count, other]
+        plt.pie(sizes, labels=labels, autopct='%1.1f%%', shadow=False, startangle=90)
+        # plt.show()
+        # save
+        plt.savefig(self.cache_dir + "/../report.png")
 
     # Tools ============================================================
     def create_target_images(self):
-        cache_dir = self.video_file_path + "-cache"
-        os.makedirs(cache_dir, exist_ok=True)
+        self.cache_dir = self.video_file_path + "-cache"
+        os.makedirs(self.cache_dir, exist_ok=True)
 
+        print("encoding video to images")
         # ffmpeg -i $VIDO_PATH  -vcodec png -r 2 -vf scale=640:360 $CACHE_PATH/image_%03d.png using popen
-        process_ffmpeg = Popen(["ffmpeg", "-i", self.video_file_path, "-vcodec", "png", "-r", "2", "-vf", "scale=640:360", cache_dir + "/image_%03d.png"], stdout=PIPE, stderr=PIPE)
+        process_ffmpeg = Popen(["ffmpeg", "-i", self.video_file_path, "-vcodec", "png", "-r", "2", "-vf", "scale=640:360", self.cache_dir + "/image_%03d.png"], stdout=PIPE, stderr=PIPE)
         # wait for process
         process_ffmpeg.wait()
+        print("encoding video to images done")
         
 
         # get cache folder length
-        self.cache_dir_length = len(os.listdir(cache_dir))
+        self.cache_dir_length = len(os.listdir(self.cache_dir))
 
         # delete images if cache_length > csv_length
         if self.cache_dir_length > len(self.test_data_class.csv_points_xy):
@@ -202,10 +189,10 @@ class MainWindow(QMainWindow):
             print("delete images: " + str(gap))
             
             for i in range(gap):
-                os.remove(cache_dir + "/image_%03d.png" % (i+1))
+                os.remove(self.cache_dir + "/image_%03d.png" % (i+1))
             # rename 
             for i in range(len(self.test_data_class.csv_points_xy)):
-                os.rename(cache_dir + "/image_%03d.png" % (i+1 + gap), cache_dir + "/image_%03d.png" % (i+1))
+                os.rename(self.cache_dir + "/image_%03d.png" % (i+1 + gap), self.cache_dir + "/image_%03d.png" % (i+1))
 
         # add images if cache_length < csv_length
         elif self.cache_dir_length < len(self.test_data_class.csv_points_xy):
@@ -215,11 +202,11 @@ class MainWindow(QMainWindow):
             print("add images: " + str(gap))
 
             for i in range(self.cache_dir_length):
-                os.rename(cache_dir + "/image_%03d.png" % (self.cache_dir_length - i), cache_dir + "/image_%03d.png" % (self.cache_dir_length - i + gap))
+                os.rename(self.cache_dir + "/image_%03d.png" % (self.cache_dir_length - i), self.cache_dir + "/image_%03d.png" % (self.cache_dir_length - i + gap))
             # add none image
             for i in range(gap):
                 image = np.zeros((360, 640, 3), dtype=np.uint8)
-                cv2.imwrite(cache_dir + "/image_%03d.png" % (i+1), image)
+                cv2.imwrite(self.cache_dir + "/image_%03d.png" % (i+1), image)
         
         else:
             print("cache images: " + str(self.cache_dir_length))
@@ -227,7 +214,14 @@ class MainWindow(QMainWindow):
             print("no need to add or delete images")
         
         
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    window = MainWindow()
-    sys.exit(app.exec_())
+def ros_main(args = None) -> None:
+    rclpy.init(args=args)
+
+    urarachallenge = urarachallenge_main()
+    rclpy.spin(urarachallenge)
+
+    urarachallenge.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == "__main__":
+    ros_main()
