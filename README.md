@@ -9,3 +9,7 @@
 ## モデル
 
 [YOLOv5](YOLOv5/README.md)
+
+## 検出手順
+
+![](https://raw.githubusercontent.com/Ar-Ray-code/urara-challenge/main/images_for_readme/1st-result/how2detect.jpeg)
