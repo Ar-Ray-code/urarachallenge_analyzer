@@ -14,6 +14,7 @@ from sensor_msgs.msg import Image
 from bboxes_ex_msgs.msg import BoundingBoxes, BoundingBox
 
 from subprocess import Popen, PIPE
+import argparse
 
 class test_data():
     def __init__(self) -> None:
@@ -48,7 +49,22 @@ class urarachallenge_main(Node):
     def __init__(self):
         super().__init__('urarachallenge')
 
+        # select csv file path
+        home = os.path.expanduser('~')
+        # script dir
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+
         self.test_data_class = test_data()
+
+        # arg (csv path)
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--csv_path", type=str, default="")
+        parser.add_argument("--video_folder", type=str, default=home + "/video")
+        parser.add_argument("--video_file", type=str, default=home + "")
+        args = parser.parse_args()
+        self.csv_file_path = args.csv_path
+        self.video_folder = args.video_folder
+        self.video_file_path = args.video_file
 
         # ROS2 init =============================================
         self.cv_bridge = CvBridge()
@@ -58,16 +74,14 @@ class urarachallenge_main(Node):
 
         # Qt init ============================================================
         self.frame_number = 1 # publish image frame number
-
-        # select csv file path
-        home = os.path.expanduser('~')
-        # script dir
-        script_dir = os.path.dirname(os.path.abspath(__file__))
+        
         # get path using select-folder-file-dialog.py
-        self.csv_file_path = Popen(["python3", script_dir + "/../select-folder-file-dialog/select-folder-file-dialog.py", "-f", "-t", "Open CSV", '-e', home], stdout=PIPE).communicate()[0].decode('utf-8').rstrip()
+        if self.csv_file_path == "":
+            self.csv_file_path = Popen(["python3", script_dir + "/../select-folder-file-dialog/select-folder-file-dialog.py", "-f", "-t", "Open CSV", '-e', home], stdout=PIPE).communicate()[0].decode('utf-8').rstrip()
         print(self.csv_file_path)
         # select target video file path
-        self.video_file_path = Popen(["python3", script_dir + "/../select-folder-file-dialog/select-folder-file-dialog.py", "-f", "-t", "Open Video", '-e', home], stdout=PIPE).communicate()[0].decode('utf-8').rstrip()
+        if self.video_file_path == "":
+            self.video_file_path = Popen(["python3", script_dir + "/../select-folder-file-dialog/select-folder-file-dialog.py", "-f", "-t", "Open Video", '-e', self.video_folder], stdout=PIPE).communicate()[0].decode('utf-8').rstrip()
         print(self.video_file_path)
 
         self.test_data_class.read_csv_point_xy(self.csv_file_path)
@@ -113,6 +127,9 @@ class urarachallenge_main(Node):
 
         if self.frame_number > len(self.test_data_class.csv_points_xy):
             self.write_report_csv()
+            # delete cache
+            import shutil
+            shutil.rmtree(self.cache_dir)
 
             # self.target_detection.delete()
             self.destroy_node()
@@ -121,16 +138,16 @@ class urarachallenge_main(Node):
         self.publish_image()
 
     def write_report_csv(self):
-        write_csv_path = self.cache_dir + "/../report.csv"
+        write_csv_path = self.cache_dir + "/../result_csv/report.csv"
         with open(write_csv_path, 'w') as f:
             f.write("frame,x,y\n")
             for i in range(len(self.test_data_class.target_points_xy)-1):
                 print(i, self.test_data_class.target_points_xy[i][0], self.test_data_class.target_points_xy[i][1], self.test_data_class.detection_result[i])
                 f.write("%d,%f,%f,%s\n" % (i , self.test_data_class.target_points_xy[i][0], self.test_data_class.target_points_xy[i][1], self.test_data_class.detection_result[i]))
-        self.pychart_plot()
+        self.plot_data()
         return None
 
-    def pychart_plot(self):
+    def plot_data(self):
         person_count = 0
         horse_count = 0
         teddy_count = 0
@@ -163,12 +180,25 @@ class urarachallenge_main(Node):
         plt.pie(sizes, labels=labels, autopct='%1.1f%%', shadow=False, startangle=90)
         # plt.show()
         # save
-        plt.savefig(self.cache_dir + "/../report.png")
+        plt.savefig(self.cache_dir + "/../result_pichart/" + self.video_file_path.split("/")[-1].split(".")[0] + ".png")
+        # save output to txt
+        with open(self.cache_dir + "/../result_text/" + self.video_file_path.split("/")[-1].split(".")[0] + ".txt", 'w') as f:
+            f.write("total: " + str(len(detection_data)) + "\n")
+            f.write("person: " + str(person_count) + "\n")
+            f.write("horse: " + str(horse_count) + "\n")
+            f.write("teddy: " + str(teddy_count) + "\n")
+            f.write("kite: " + str(kite_count) + "\n")
+            f.write("other: " + str(other) + "\n")
+        
+
 
     # Tools ============================================================
     def create_target_images(self):
         self.cache_dir = self.video_file_path + "-cache"
         os.makedirs(self.cache_dir, exist_ok=True)
+        os.makedirs(self.cache_dir + "/../result_text", exist_ok=True)
+        os.makedirs(self.cache_dir + "/../result_pichart", exist_ok=True)
+        os.makedirs(self.cache_dir + "/../result_csv", exist_ok=True)
 
         print("encoding video to images")
         # ffmpeg -i $VIDO_PATH  -vcodec png -r 2 -vf scale=640:360 $CACHE_PATH/image_%03d.png using popen
