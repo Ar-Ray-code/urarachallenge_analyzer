@@ -3,7 +3,7 @@ SCRIPT_DIR=$(cd $(dirname $0); pwd)
 _USER=${SCRIPT_DIR##*home/}
 USER=${_USER%%/*}
 
-SELECT_FOLDER_FILE_DIALOG=$SCRIPT_DIR/../select-folder-file-dialog/select-folder-file-dialog.py
+SELECT_FOLDER_FILE_DIALOG=$SCRIPT_DIR/../select-file-folder-dialog-PyQt5/select-folder-file-dialog.py
 
 MP4S_DIR=`python3 $SELECT_FOLDER_FILE_DIALOG -t "Select mp4s folder" -e $HOME/Videos`
 CSV_FILE=`python3 $SELECT_FOLDER_FILE_DIALOG -t "Select csv file" -e $HOME/Videos -f`
